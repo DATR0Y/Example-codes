@@ -1,0 +1,336 @@
+using System.Collections;
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+public class HeroControl : MonoBehaviour
+{
+    [Header("Global")]
+    public bool CanMove = true;
+
+    [Header("Components")]
+    Rigidbody2D rb;
+    Animator Anim;
+    private ParticleSystem Particle;
+    [SerializeField] SaveSpawnPosition SaveSpawn;
+
+    [Header("Move")]
+    public Vector2 moveVector;
+    public float speed = 1.0f;
+
+    [Header("Jump")]
+    public float JumpForce = 5.0f;
+
+    [Header("Gravity")]
+    public float baseGravity = 2.0f;
+    public float maxFallSpeed = 10.0f;
+    public float fallSpeedMultyplier;
+    private InputAction.CallbackContext MoveFixContext;
+
+    [Header("Dash")]
+    public float dashSpeed = 10.0f;
+    public float dashDuration = 0.5f;
+    public float dashCoolDown = 0.1f;
+    private bool isDashing = false;
+    private bool canDash = true;
+    private TrailRenderer trail;
+
+    [Header("Grab")]
+    public bool IstErGrab = false;
+
+    [Header("Ground_cheak")]
+    public Transform groundCheakPos;
+    public Vector2 groundCheckSize = new Vector2(0.5f, 0.05f);
+    public LayerMask groundLayer;
+
+    [Header("Wall_cheak")]
+    public Transform wallCheakPos_up;
+    public Transform wallCheakPos_down;
+    public Vector2 wallCheckSize = new Vector2(0.5f, 0.05f);
+    public LayerMask wallLayer;
+
+    [Header("Move on walls")]
+    public float WallMoveUpDownSpeed = 1.0f;
+    public float WallsliceSpeed = 2.0f;
+
+    [Header("Wall Jump")]
+    public bool blockMoveXforJump = false;
+    bool CanJumpFromWall = false;
+    public float jumpWallTime = 0.5f;
+    private float timerJumpWall;
+    float JumpDirection;
+    [SerializeField]Vector2 jumpAngle = new Vector2(2f, 5f);
+    public float grabBlockTimer = 0.2f;
+    public float grabBlockTime = 0.00f;
+
+    [Header("Audio")]
+    public float StepAudioTimer = 0.2f;
+    float StepAudioTime = 0.0f;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody2D>();
+        Anim = GetComponent<Animator>();
+        Particle = GetComponent<ParticleSystem>();
+        trail = GetComponent<TrailRenderer>();
+    }
+    void Update()
+    {
+        if(!(CanIGrab() && IsOnWall()))
+            Flip();
+        Gravity();
+        GrabTimer();
+        MoveOnWall();
+        WallJump();
+        Anim.SetBool("IstErMove", moveVector.x != 0);
+        if (Anim.GetBool("IstErMove") && IsGrounded() && !(IstErGrab && IsOnWall()) && !Anim.GetBool("IstErSit")) 
+        {
+            if(StepAudioTime < 0.0f) 
+            {
+                try
+                {
+                    SoundManager.Play("StepsDirt");
+                }
+                catch
+                {
+                    Debug.Log("нет ссылки на менеджера звуков");
+                }
+                
+                StepAudioTime = StepAudioTimer;
+            }
+            else
+            {
+                StepAudioTime -= Time.deltaTime;
+            }
+
+        } //step sound
+
+        if (!isDashing && !blockMoveXforJump && !(CanIGrab() && IsOnWall() ) && !Anim.GetBool("IstErSit")) 
+        {
+            rb.velocity = new Vector2(moveVector.x * speed, rb.velocity.y);
+        }//base move
+
+        if (moveVector.y == -1 && IsGrounded() && !(IsOnWall() && IstErGrab)) // Sit
+        {
+            Anim.SetBool("IstErSit", true);
+            rb.velocity = new Vector2(0, 0);
+        }
+        else
+        {
+            Anim.SetBool("IstErSit", false);
+        }
+
+    }
+
+    private void FixedUpdate()
+    {
+        IsGrounded();
+    }
+    public void MoveInput(InputAction.CallbackContext context)
+    {
+        
+        MoveFixContext = context;
+        if (!EscMenu.IsEscapeMenuOn && CanMove) 
+        {
+            moveVector.x = Mathf.Round(MoveFixContext.ReadValue<Vector2>().x);
+            moveVector.y = Mathf.Round(MoveFixContext.ReadValue<Vector2>().y);
+        }
+        
+    }
+    public void Jump(InputAction.CallbackContext context) 
+    {
+        if (!EscMenu.IsEscapeMenuOn && CanMove && !Anim.GetBool("IstErSit"))
+        {
+            if (IsGrounded() && !(IsOnWall() && CanIGrab())) //jump from ground
+            {
+                Particle.Play();
+                CamManager.CameraShake?.Invoke(0.5f, 0.05f, 0.05f);
+                if (context.performed)
+                {
+                    rb.velocity = new Vector2(rb.velocity.x, JumpForce);
+                }
+                else
+                    rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * 0.5f);
+
+            }
+            else if (IsOnWall() && !blockMoveXforJump && CanJumpFromWall && context.phase == InputActionPhase.Started) // jump from wall
+            {
+                blockMoveXforJump = true;
+                //moveVector.x = 0;
+                if (moveVector.x != 0 && Anim.GetBool("IstErRight") == !(moveVector.x == 1f ? true : false))
+                    Anim.SetBool("IstErRight", !Anim.GetBool("IstErRight"));
+                if (Anim.GetBool("IstErRight"))
+                {
+                    wallCheakPos_up.transform.localPosition = new Vector3(0.082f, wallCheakPos_up.localPosition.y, 0f);
+                    wallCheakPos_down.transform.localPosition = new Vector3(0.082f, wallCheakPos_down.localPosition.y, 0f);
+                }
+                else if (!Anim.GetBool("IstErRight"))
+                {
+                    wallCheakPos_up.transform.localPosition = new Vector3(-0.11f, wallCheakPos_up.localPosition.y, 0f);
+                    wallCheakPos_down.transform.localPosition = new Vector3(-0.11f, wallCheakPos_down.localPosition.y, 0f);
+                }
+                if (moveVector.x != 0)
+                    JumpDirection = Anim.GetBool("IstErRight") ? 1f : -1f;
+                else
+                {
+                    JumpDirection = 0f;
+
+                }
+                grabBlockTime = grabBlockTimer;
+                rb.gravityScale = baseGravity;
+                rb.velocity = new Vector2(0, 0);
+                Anim.SetBool("IstErGrab", CanIGrab());
+                rb.velocity = new Vector2(JumpDirection * jumpAngle.x, jumpAngle.y);
+
+            }
+        }
+    }
+    public void Grab(InputAction.CallbackContext context)
+    {
+        if (!EscMenu.IsEscapeMenuOn)
+        {
+            IstErGrab = context.performed;
+            Anim.SetBool("IstErGrab", CanIGrab());
+        }
+    }
+    public void GrabTimer() 
+    {
+        if(grabBlockTime > 0) 
+        {
+            grabBlockTime -= Time.deltaTime;
+        }
+        Anim.SetBool("IstErGrab", CanIGrab());
+    }
+    public bool CanIGrab()
+    {
+        if (grabBlockTime > 0) 
+            return false;
+        else if (IstErGrab)
+            return true;
+        else return false;
+
+    }
+    void MoveOnWall()
+    { 
+        if (Physics2D.OverlapBox(wallCheakPos_down.position, wallCheckSize, 0, wallLayer) && Physics2D.OverlapBox(wallCheakPos_up.position, wallCheckSize, 0, wallLayer) && CanIGrab() && !blockMoveXforJump)
+        {
+            CanJumpFromWall = true;
+            Anim.SetFloat("UpDown", moveVector.y);
+            if (moveVector.y == 0)
+            {
+                rb.gravityScale = 0;
+                rb.velocity = new Vector2(0, 0);
+            }
+            else
+                rb.velocity = new Vector2(rb.velocity.x, moveVector.y * WallMoveUpDownSpeed);
+        }
+        else if(Physics2D.OverlapBox(wallCheakPos_down.position, wallCheckSize, 0, wallLayer) && !Physics2D.OverlapBox(wallCheakPos_up.position, wallCheckSize, 0, wallLayer) && !blockMoveXforJump)
+        {
+            if(moveVector.y > 0)
+                rb.velocity = new Vector2(rb.velocity.x, jumpAngle.y);
+        }
+        else if (!IsGrounded() && !IsOnWall())
+        {
+            rb.gravityScale = baseGravity;
+        }
+        if (IsOnWall() && !IsGrounded() && !CanIGrab()) 
+        {
+            CanJumpFromWall = (moveVector.x == 1 && Anim.GetBool("IstErRight")) || (moveVector.x == -1 && !Anim.GetBool("IstErRight"));
+        }
+        
+    }
+    void WallJump()
+    {
+        if ((blockMoveXforJump && (timerJumpWall += Time.deltaTime) >= jumpWallTime) || (blockMoveXforJump && (IsOnWall() || IsGrounded())))
+        {
+            blockMoveXforJump = false;
+            timerJumpWall = 0;
+            MoveInput(MoveFixContext);
+        }
+
+    }
+    void Gravity()
+    {
+        if (rb.velocity.y < 0)
+        {
+            rb.gravityScale = baseGravity * fallSpeedMultyplier;
+            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFallSpeed));
+        }
+        else
+        {
+            rb.gravityScale = baseGravity;
+        }
+    }
+    void Flip() 
+    {
+        if (moveVector.x != 0 && moveVector.x > 0.00f)
+        {
+            Anim.SetBool("IstErRight", true);
+            wallCheakPos_up.transform.localPosition = new Vector3(0.082f, wallCheakPos_up.localPosition.y, 0f);
+            wallCheakPos_down.transform.localPosition = new Vector3(0.082f, wallCheakPos_down.localPosition.y, 0f);
+        }
+        else if (moveVector.x != 0 && moveVector.x < 0.00f)
+        {
+            Anim.SetBool("IstErRight", false);
+            wallCheakPos_up.transform.localPosition = new Vector3(-0.11f, wallCheakPos_up.localPosition.y, 0f);
+            wallCheakPos_down.transform.localPosition = new Vector3(-0.11f, wallCheakPos_down.localPosition.y, 0f);
+        }
+    }
+    public void Dash(InputAction.CallbackContext context)
+    {
+        if (context.performed && canDash && !EscMenu.IsEscapeMenuOn && CanMove && !(IstErGrab && IsOnWall()))
+        {
+            SoundManager.Play("Dash");
+            StartCoroutine(DashCoroutine());
+        }
+    }
+    private IEnumerator DashCoroutine()
+    {
+        canDash = false;
+        isDashing = true;
+
+        trail.emitting = true;
+        float dashdirection = Anim.GetBool("IstErRight") ? 1f : -1f;
+        rb.velocity = new Vector2(dashdirection * dashSpeed, rb.velocity.y);
+        yield return new WaitForSeconds(dashDuration);
+        rb.velocity = new Vector2(0, rb.velocity.y);
+        blockMoveXforJump = false;
+        timerJumpWall = 0;
+        isDashing = false;
+        trail.emitting = false;
+        yield return new WaitForSeconds(dashCoolDown);
+        canDash = true;
+    }
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.white;
+        Gizmos.DrawCube(groundCheakPos.position, groundCheckSize);
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawCube(wallCheakPos_up.position, wallCheckSize);
+        Gizmos.DrawCube(wallCheakPos_down.position, wallCheckSize);
+
+    }
+    private bool IsOnWall()
+    {
+        Anim.SetBool("IstErOnWall", (Physics2D.OverlapBox(wallCheakPos_up.position, wallCheckSize, 0, wallLayer) && Physics2D.OverlapBox(wallCheakPos_down.position, wallCheckSize, 0, wallLayer) ) ||
+                                    ( Physics2D.OverlapBox(wallCheakPos_down.position, wallCheckSize, 0, wallLayer) && !Physics2D.OverlapBox(wallCheakPos_up.position, wallCheckSize, 0, wallLayer)) );
+        return Physics2D.OverlapBox(wallCheakPos_up.position, wallCheckSize, 0, wallLayer) && Physics2D.OverlapBox(wallCheakPos_down.position, wallCheckSize, 0, wallLayer);
+    }
+    private bool IsGrounded()
+    {
+        Anim.SetBool("IstErGround", Physics2D.OverlapBox(groundCheakPos.position, groundCheckSize, 0, groundLayer));
+        return Physics2D.OverlapBox(groundCheakPos.position, groundCheckSize, 0, groundLayer);
+    }
+    public void DeathAnim()
+    {
+        Anim.SetTrigger("Die");
+        rb.bodyType = RigidbodyType2D.Static;
+        PlayerPrefs.SetInt($"DeathCount_{SaveSpawnPosition.Glava_ID}", PlayerPrefs.GetInt($"DeathCount_{SaveSpawnPosition.Glava_ID}") + 1);
+        CamManager.CameraShake?.Invoke(4f, 0.1f, 0.1f);
+    }
+    public void Death()
+    {
+        transform.position = SaveSpawn.Spawn.transform.position;
+        rb.bodyType = RigidbodyType2D.Dynamic;
+    }
+}
+

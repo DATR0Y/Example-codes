@@ -1,0 +1,58 @@
+using System.Collections.Generic;
+using TMPro;
+using UnityEngine;
+
+public class DialogMessage : MonoBehaviour
+{
+    [Header("Messages")]
+    public List<Message> message;
+
+    [Header("Links")]
+    public GameObject HelpUI;
+    public TMP_Text HelpUIText;
+
+    [Header("Links")]
+    public string LinkBind1;
+    public string LinkBind2;
+
+    [Header("Special")]
+    public bool isEnd;
+    public bool IsSave = false;
+    public Vector3 SaveCoord;
+    public string CutSceneName;
+
+    private void Start()
+    {
+        HelpUIText.text = GetBindToText.GetBind("Interact");
+        HelpUIText.gameObject.SetActive(false); //hide helps
+        HelpUI.SetActive(false);
+
+        SaveCoord = transform.position; //SaveCord as Default
+        
+        LinkBind1 = GetBindToText.GetBind(LinkBind1);
+        LinkBind2 = GetBindToText.GetBind(LinkBind2);
+    }
+    public void StartUIAnim()
+    {
+        HelpUI.SetActive(true);
+        HelpUI.GetComponent<Animator>().Play("Open");
+    }
+    public void CloseUIAnim()
+    {
+        HelpUI.GetComponent<Animator>().Play("Close");
+    }
+    public Vector3 GetSavePosition()
+    {
+        return SaveCoord;
+    }
+}
+[System.Serializable]
+public class Message
+{
+    public string message;
+    public string Author;
+    public float speedText = 0.04f;
+    public int AnimationID = 0;
+    public string DialogSound;
+
+}

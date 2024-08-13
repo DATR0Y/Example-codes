@@ -1,0 +1,150 @@
+using System.Collections;
+using UnityEngine;
+using TMPro;
+using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
+
+public class Dialogmanager : MonoBehaviour
+{
+    [Header("Main")]
+    private bool talking = false;
+    private bool canGoNext = true;
+    public DialogMessage SelectedMessage = null;
+    private int currentStroke = 0;
+    [Header("Links")]
+    [SerializeField] TMP_Text dialog_text;
+    [SerializeField] Animator dialogFace;
+    [SerializeField] GameObject dialogPanel;
+    [SerializeField] TMP_Text authorText;
+
+
+    [SerializeField] Transform Spawnpoint;
+    [SerializeField] SaveSpawnPosition savescript;
+
+    void Start()
+    {
+        dialogPanel.gameObject.SetActive(false);
+    }
+    public void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.GetComponent<DialogMessage>() != null)
+        {
+            SelectedMessage = other.GetComponent<DialogMessage>();
+
+            SelectedMessage.StartUIAnim();
+        }
+    }
+    public void OnTriggerExit2D(Collider2D other)
+    {
+        if (other.gameObject.GetComponent<DialogMessage>() != null)
+        {
+            SelectedMessage.CloseUIAnim();
+            SelectedMessage = null;
+            talking = false;
+            canGoNext = true;
+            if (dialogPanel != null)
+                dialogPanel.gameObject.SetActive(false);
+            
+        }
+    }
+    void Update()
+    {
+        if (SelectedMessage != null && !talking)
+            StartTalk();
+    }
+    public void Interact(InputAction.CallbackContext context)
+    {
+
+        if (talking && context.phase == InputActionPhase.Started && SelectedMessage != null)
+        {
+            if (currentStroke < SelectedMessage.message.Count)
+            {
+                if(SelectedMessage.HelpUI.activeInHierarchy == true)
+                    SelectedMessage.CloseUIAnim();
+                if (canGoNext)
+                {
+                    if (SelectedMessage.message[currentStroke].AnimationID != 0)
+                    {
+                        dialogFace.gameObject.SetActive(true);
+                        
+                        dialogFace.SetFloat("AnimIDFloat", (float)SelectedMessage.message[currentStroke].AnimationID);
+                    }
+                    else
+                    {
+                        dialogFace.gameObject.SetActive(false);
+                    }
+                    SelectedMessage.message[currentStroke].message = string.Format(SelectedMessage.message[currentStroke].message, SelectedMessage.LinkBind1, SelectedMessage.LinkBind2);
+                    StartCoroutine(StingExport(SelectedMessage.message[currentStroke]));
+                }
+                else
+                {
+                    canGoNext = true;
+                    dialog_text.text = string.Format(SelectedMessage.message[currentStroke].message, SelectedMessage.LinkBind1, SelectedMessage.LinkBind2);
+
+                }
+            }
+            else
+            {
+                talking = false;
+                dialogPanel.gameObject.SetActive(false);
+                SelectedMessage.StartUIAnim();
+                if (SelectedMessage.IsSave)
+                {
+                    SaveSpawnPosition.SavePos(SelectedMessage.GetSavePosition().x, SelectedMessage.GetSavePosition().y + 0.1f);
+                    SelectedMessage.gameObject.GetComponent<ParticleSystem>().Play();
+                    if (SelectedMessage.CutSceneName != null)
+                        PlayerPrefs.SetString($"CutScene_{SaveSpawnPosition.Glava_ID}", SelectedMessage.CutSceneName);
+                    
+                }
+                else if (SelectedMessage.isEnd)
+                { 
+                    ResultRowScript.sceneID = SceneManager.GetActiveScene().buildIndex;
+                    SceneLoader.StartLoad("SceneResult");
+                }
+
+            }
+        }
+    }
+
+    void StartTalk()
+    {
+        talking = true;
+
+        dialog_text.text = " ";
+        canGoNext = true;
+        currentStroke =0;
+    }
+    IEnumerator StingExport(Message message)
+    {
+        canGoNext = false;
+        dialog_text.text =  $""; 
+        dialogFace.speed = 1;
+        dialogPanel.gameObject.SetActive(true);
+        dialogFace.SetFloat("AnimIDFloat", message.AnimationID);
+        foreach (var sym in message.message)
+        {
+            if (!canGoNext)
+            {
+                authorText.text = message.Author;
+                dialogFace.Play("Artur", 1);
+                dialog_text.text += sym;
+                if (message.DialogSound.Length > 0) 
+                {
+                    try
+                    {
+                        SoundManager.Play(message.DialogSound);
+                    }
+                    catch  { Debug.Log("Потеряна ссылка на Sound manager или звук не найден"); }
+                }
+                yield return new WaitForSeconds(message.speedText);
+            }
+            else
+                break;
+        }
+        dialogFace.Play("Artur", 0, 0f);
+        dialogFace.speed = 0;
+        canGoNext = true;
+        currentStroke++;
+    }
+
+}
